@@ -1,0 +1,13 @@
+!.gitignore
+.idea/
+__pycache__/
+bert_base_uncased/*
+baselines_chenchaoyu/*
+*test*.py
+*.zip
+*.rar
+*.7z
+ckpt/
+dataset/
+*.out
+*.txt

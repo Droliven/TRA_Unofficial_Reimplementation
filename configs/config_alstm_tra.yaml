@@ -1,0 +1,41 @@
+num_states: &num_states 10 # 第1处
+
+model:
+  lr: 0.0001 # 第2处
+  n_epochs: 500
+  max_steps_per_epoch: 100
+  early_stop: 20
+  seed: 1000
+  logdir: ckpt/alstm_tra # 第3处
+  model_type: LSTM
+  model_config:
+    input_size: 16
+    hidden_size: 256
+    num_layers: 2
+    num_heads: 2
+    use_attn: True
+    dropout: 0.1
+  tra_config:
+    num_states: *num_states
+    hidden_size: 16
+    tau: 1.0
+    src_info: LR_TPE
+  lamb: 2.0 # 第4处
+  rho: 0.99
+  freeze_model: True # 第5处
+  model_init_state: ckpt/alstm_tra_init/model.bin # 第6处
+dataset:
+  handler:
+    data_loader:
+      config:
+        feature: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\feature.pkl
+        label: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\label.pkl
+  segments:
+    train: [2007-10-30, 2016-05-27]
+    valid: [2016-09-26, 2018-05-29]
+    test: [2018-09-21, 2020-06-30]
+  seq_len: 60
+  horizon: 21
+  num_states: *num_states
+  batch_size: 1024 # 第7处
+  is_debug: False
