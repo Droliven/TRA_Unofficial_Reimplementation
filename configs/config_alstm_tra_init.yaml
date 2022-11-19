@@ -1,4 +1,4 @@
-num_states: &num_states 3 # 第1处
+num_states: &num_states 3 # 第1处，代表的是学习几种多样性的特征
 
 model:
   lr: 0.0002 # 第2处
@@ -28,8 +28,12 @@ dataset:
   handler:
     data_loader:
       config:
-        feature: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\feature.pkl
-        label: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\label.pkl
+#        feature: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\feature.pkl
+#        label: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\label.pkl
+#        ret: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\ret.pkl
+        feature: /home/songbo/danglingwei209/datas/ranking/tra_data/feature.pkl
+        label: /home/songbo/danglingwei209/datas/ranking/tra_data/label.pkl
+        ret: /home/songbo/danglingwei209/datas/ranking/tra_data/ret.pkl
   segments:
     train: [2007-10-30, 2016-05-27]
     valid: [2016-09-26, 2018-05-29]

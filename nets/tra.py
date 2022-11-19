@@ -42,29 +42,29 @@ class TRA(nn.Module):
         self.predictors = nn.Linear(input_size, num_states)
 
     def forward(self, hidden, hist_loss):
-
-        preds = self.predictors(hidden)
+        # [b, 512], [b, 60-21, 3]
+        preds = self.predictors(hidden) # [b, 3]
 
         if self.num_states == 1:
             return preds.squeeze(-1), preds, None
 
         # information type
-        router_out, _ = self.router(hist_loss)
+        router_out, _ = self.router(hist_loss) # [b, 60-21, 16]
         if "LR" in self.src_info:
-            latent_representation = hidden
+            latent_representation = hidden # [b, 512]
         else:
             latent_representation = torch.randn(hidden.shape).to(hidden)
         if "TPE" in self.src_info:
-            temporal_pred_error = router_out[:, -1]
+            temporal_pred_error = router_out[:, -1] # [b, 16]
         else:
             temporal_pred_error = torch.randn(router_out[:, -1].shape).to(hidden)
 
-        out = self.fc(torch.cat([temporal_pred_error, latent_representation], dim=-1))
+        out = self.fc(torch.cat([temporal_pred_error, latent_representation], dim=-1)) # [b, 3], 把这个特征当做 gumbel 分布的概率
         prob = F.gumbel_softmax(out, dim=-1, tau=self.tau, hard=False)
 
         if self.training:
-            final_pred = (preds * prob).sum(dim=-1)
+            final_pred = (preds * prob).sum(dim=-1) # [b]
         else:
-            final_pred = preds[range(len(preds)), prob.argmax(dim=-1)]
+            final_pred = preds[range(len(preds)), prob.argmax(dim=-1)] # [] # todo: 测试的时候，为什么要这么取
 
         return final_pred, preds, prob

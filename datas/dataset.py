@@ -19,7 +19,7 @@ import torch
 from datas.data_utils_func import lazy_sort_index, load_dataset, _to_tensor
 
 
-def _create_ts_slices(index, seq_len):
+def _create_timeseries_slices(index, seq_len):
     """
     create time series slices from pandas index
 
@@ -45,7 +45,7 @@ def _create_ts_slices(index, seq_len):
             end = cur_firstidx + stop
             start = max(end - seq_len, 0)
             slices.append(slice(start, end))
-    slices = np.array(slices) # todo: 这些切片长短不统一
+    slices = np.array(slices) # todo: 这些切片长短不统一，但总量跟原本的数据量相等。长短不一，但最终都补 0 对齐了
 
     return slices
 
@@ -59,7 +59,7 @@ def _get_date_parse_fn(target):
         get_date_parse_fn('20120101')('2017-01-01') => '20170101'
         get_date_parse_fn(20120101)('2017-01-01') => 20170101
     """
-    if isinstance(target, pd.Timestamp):
+    if isinstance(target, pd.Timestamp): # 真正调用的是这个函数
         _fn = lambda x: pd.Timestamp(x)  # Timestamp('2020-01-01')
     elif isinstance(target, str) and len(target) == 8:
         _fn = lambda x: str(x).replace("-", "")[:8]  # '20200201'
@@ -130,6 +130,10 @@ class MemoryAugmentedTimeSeriesDataset():
         )
 
     def setup_data(self):
+        '''
+        制作一整个数据集，不区分训练、验证、测试集
+        :return:
+        '''
         self.longger.info("Setup data ...")
 
         handler_data = pd.concat(
@@ -148,7 +152,7 @@ class MemoryAugmentedTimeSeriesDataset():
         # add memory to feature
         self._data = np.c_[self._data, np.zeros((len(self._data), self.num_states), dtype=np.float32)] # [n, 16+numstage]
 
-        # padding tensor
+        # padding tensor: 长短不一，但最终都补 0 对齐了
         self.zeros = np.zeros((self.seq_len, self._data.shape[1]), dtype=np.float32) # [60, 16+num_stage]
 
         # pin memory
@@ -157,14 +161,15 @@ class MemoryAugmentedTimeSeriesDataset():
             self._label = _to_tensor(self._label, self.device)
             self.zeros = _to_tensor(self.zeros, self.device)
 
-        # ===== create batch slices =====
-        self.batch_slices = _create_ts_slices(self._index, self.seq_len) # [2512790], 是不对齐的
+        # ===== create slices =====
+        # todo: batch slice 与 daily slice 有什么区别
+        self.batch_slices = _create_timeseries_slices(self._index, self.seq_len) # [2512790], 左闭右开区间，是不对齐的，但总量与原数据量相等
 
         # create daily slices
-        index = [slc.stop - 1 for slc in self.batch_slices]
-        act_index = self.restore_index(index)
-        daily_slices = {date: [] for date in sorted(act_index.unique(level=1))} # 3141 天
-        for i, (code, date) in enumerate(act_index):
+        right_idx_of_index = [slc.stop - 1 for slc in self.batch_slices]
+        right_actural_index = self.restore_index(right_idx_of_index) # [code, end_datetime]
+        daily_slices = {date: [] for date in sorted(right_actural_index.unique(level=1))} # 3141 天
+        for i, (code, date) in enumerate(right_actural_index):
             daily_slices[date].append(self.batch_slices[i])
         self.daily_slices = list(daily_slices.values())
 
@@ -187,6 +192,7 @@ class MemoryAugmentedTimeSeriesDataset():
         obj._index = self._index
         new_batch_slices = []
         for batch_slc in self.batch_slices:
+            # todo: 为什么只检查右区间
             date = self._index[batch_slc.stop - 1][1]
             if start_date <= date <= end_date:
                 new_batch_slices.append(batch_slc)
@@ -207,7 +213,7 @@ class MemoryAugmentedTimeSeriesDataset():
             **kwargs,
     ) -> Union[List[pd.DataFrame], pd.DataFrame]:
         """
-        Prepare the data for learning and inference.
+        划分制作训练、验证、测试集
 
         Parameters
         ----------
@@ -266,7 +272,13 @@ class MemoryAugmentedTimeSeriesDataset():
             index = index.cpu().numpy()
         return self._index[index]
 
-    def assign_data(self, index, vals):
+    def update_memory(self, index, vals):
+        '''
+        更新记忆
+        :param index:
+        :param vals: [b, numstates]
+        :return:
+        '''
         if isinstance(self._data, torch.Tensor):
             vals = _to_tensor(vals, self.device)
         elif isinstance(vals, torch.Tensor):
@@ -289,6 +301,10 @@ class MemoryAugmentedTimeSeriesDataset():
         self.shuffle = False
 
     def _get_slices(self):
+        '''
+
+        :return:
+        '''
         if self.batch_size < 0:
             slices = self.daily_slices.copy()
             batch_size = -1 * self.batch_size
@@ -321,12 +337,13 @@ class MemoryAugmentedTimeSeriesDataset():
             index = []
             for slc in slices_subset:
                 _data = self._data[slc].clone() if self.pin_memory else self._data[slc].copy()
+                # padding
                 if len(_data) != self.seq_len:
                     if self.pin_memory:
                         _data = torch.cat([self.zeros[: self.seq_len - len(_data)], _data], axis=0)
                     else:
                         _data = np.concatenate([self.zeros[: self.seq_len - len(_data)], _data], axis=0)
-                if self.num_states > 0:
+                if self.num_states > 0: # todo: horizon 到底在做什么
                     _data[-self.horizon:, -self.num_states:] = 0
                 data.append(_data)
                 label.append(self._label[slc.stop - 1])
@@ -343,27 +360,6 @@ class MemoryAugmentedTimeSeriesDataset():
             # print(f"data: {data.shape}, label: {label.shape}, index: {index.shape}") # [b, 60, 17], [b], [b]
             yield {"data": data, "label": label, "index": index}
 
-    # # helper functions
-    # @staticmethod
-    # def get_min_time(segments):
-    #     return MemoryAugmentedTimeSeriesDataset._get_extrema(segments, 0, (lambda a, b: a > b))
-    #
-    # @staticmethod
-    # def get_max_time(segments):
-    #     return MemoryAugmentedTimeSeriesDataset._get_extrema(segments, 1, (lambda a, b: a < b))
-    #
-    # @staticmethod
-    # def _get_extrema(segments, idx: int, cmp: Callable, key_func=pd.Timestamp):
-    #     """it will act like sort and return the max value or None"""
-    #     candidate = None
-    #     for k, seg in segments.items():
-    #         point = seg[idx]
-    #         if point is None:
-    #             # None indicates unbounded, return directly
-    #             return None
-    #         elif candidate is None or cmp(key_func(candidate), key_func(point)):
-    #             candidate = point
-    #     return candidate
 
 
 

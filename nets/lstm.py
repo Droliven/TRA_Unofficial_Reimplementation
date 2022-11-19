@@ -66,20 +66,24 @@ class LSTM(nn.Module):
             self.output_size = hidden_size
 
     def forward(self, x):
+        '''
 
+        :param x: [n, 60, 16]
+        :return:
+        '''
         x = self.input_drop(x)
 
         if self.training and self.noise_level > 0:
             noise = torch.randn_like(x).to(x)
             x = x + noise * self.noise_level
 
-        rnn_out, _ = self.rnn(x)
+        rnn_out, _ = self.rnn(x) # [n, 60, 64]
         last_out = rnn_out[:, -1]
 
         if self.use_attn:
             laten = self.W(rnn_out).tanh()
-            scores = self.u(laten).softmax(dim=1)
-            att_out = (rnn_out * scores).sum(dim=1).squeeze()
+            scores = self.u(laten).softmax(dim=1) # [b, 60, 1] 注意这个 attention 就是这么来的
+            att_out = (rnn_out * scores).sum(dim=1).squeeze() # [b, 64]
             last_out = torch.cat([last_out, att_out], dim=1)
 
         return last_out

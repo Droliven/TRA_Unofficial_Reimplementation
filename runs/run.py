@@ -22,14 +22,22 @@ import collections
 import json
 import pandas as pd
 import copy
-import yaml
+from joblib import Parallel, delayed
+from tensorboardX import SummaryWriter
 
 from nets.tra import TRA
 from nets.lstm import LSTM
 from datas.dataset import MemoryAugmentedTimeSeriesDataset
+from runs.backtest import backtest
+
 
 def evaluate(pred):
-    pred = pred.rank(pct=True)  # transform into percentiles
+    '''
+
+    :param pred: # [b, 1+1 + 3 + 3]
+    :return:
+    '''
+    pred = pred.rank(pct=True) # 根据 score 排序 # transform into percentiles
     score = pred.score
     label = pred.label
     diff = score - label
@@ -40,6 +48,11 @@ def evaluate(pred):
 
 
 def average_params(params_list):
+    '''
+    todo: 这个函数在干嘛
+    :param params_list:
+    :return:
+    '''
     assert isinstance(params_list, (tuple, list, collections.deque))
     n = len(params_list)
     if n == 1:
@@ -79,6 +92,13 @@ def shoot_infs(inp_tensor):
 
 
 def sinkhorn(Q, n_iters=3, epsilon=0.01):
+    '''
+    一种最优传输理论的解法，目标是使得分布接近
+    :param Q:
+    :param n_iters:
+    :param epsilon:
+    :return:
+    '''
     # epsilon should be adjusted according to logits value's scale
     with torch.no_grad():
         Q = shoot_infs(Q)
@@ -110,16 +130,12 @@ class Run_TRAModel():
                  seed=1000,
                  logdir=None,
                  eval_train=True,
-                 eval_test=False,
+                 eval_test=True,
                  avg_params=True,
                  **kwargs
             ):
 
         self.logger = logger
-
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-
 
         if model_type == "LSTM":
             self.model = LSTM(**model_config).to(device)
@@ -140,6 +156,7 @@ class Run_TRAModel():
         # 导入数据集
         self.dataset = MemoryAugmentedTimeSeriesDataset(longger=self.logger, device=device, **dataset_cfg)
 
+        self.ret_path = dataset_cfg["handler"]["data_loader"]["config"]["ret"]
         self.model_config = model_config
         self.tra_config = tra_config
         self.lr = lr
@@ -166,6 +183,9 @@ class Run_TRAModel():
         self.fitted = False
         self.global_step = -1
 
+        self.summary_writer = SummaryWriter(logdir=self.logdir)
+
+
     def train_epoch(self, data_set):
 
         self.model.train()
@@ -177,47 +197,56 @@ class Run_TRAModel():
         if self.max_steps_per_epoch is not None:
             max_steps = min(self.max_steps_per_epoch, self.n_epochs)
 
-        count = 0
         total_loss = 0
-        total_count = 0
+        total_mse_loss = 0
+        total_assign_loss = 0
+        sample_count = 0
+        step_count = 0
+
         for batch in tqdm(data_set, total=max_steps, desc=f"Train"):
-            count += 1
-            if count > max_steps:
+            step_count += 1
+            if step_count > max_steps:
                 break
 
             self.global_step += 1
 
             data, label, index = batch["data"], batch["label"], batch["index"]
             # [b, 60, 17], [b], [b]
-            feature = data[:, :, : -self.tra.num_states]
-            hist_loss = data[:, : -data_set.horizon, -self.tra.num_states:]
+            feature = data[:, :, : -self.tra.num_states] # [b, 60, 16]
+            hist_loss = data[:, :-data_set.horizon, -self.tra.num_states:]
 
             hidden = self.model(feature)  # [b, 512]
-            pred, all_preds, prob = self.tra(hidden, hist_loss)  # [b], [b, 1], None
+            pred, all_preds, prob = self.tra(hidden, hist_loss)  # [b], [b, numstates], [b, numstates]
 
-            loss = (pred - label).pow(2).mean()
+            mse_loss = (pred - label).pow(2).mean()
 
             L = (all_preds.detach() - label[:, None]).pow(2)
             L -= L.min(dim=-1, keepdim=True).values  # normalize & ensure positive input
 
-            data_set.assign_data(index, L)  # save loss to memory
+            data_set.update_memory(index, L)  # save loss to memory
 
+            assign_loss = 0
             if prob is not None:
                 P = sinkhorn(-L, epsilon=0.01)  # sample assignment matrix
                 lamb = self.lamb * (self.rho ** self.global_step)
                 reg = prob.log().mul(P).sum(dim=-1).mean()
-                loss = loss - lamb * reg
+                assign_loss = - lamb * reg
 
+            loss = mse_loss + assign_loss
             loss.backward()
             self.optimizer.step()
             self.optimizer.zero_grad()
 
             total_loss += loss.item()
-            total_count += len(pred)
+            total_mse_loss += mse_loss.item()
+            total_assign_loss += assign_loss.item()
+            sample_count += len(pred)
 
-        total_loss /= total_count
+        total_loss /= sample_count
+        total_mse_loss /= sample_count
+        total_assign_loss /= sample_count
 
-        return total_loss
+        return total_loss, total_mse_loss, total_assign_loss
 
     def test_epoch(self, data_set, return_pred=False):
 
@@ -227,30 +256,29 @@ class Run_TRAModel():
 
         preds = []
         metrics = []
-        for batch in tqdm(data_set):  # [2088]
+        for batch in tqdm(data_set, desc=f"Test"):  # [2088]
             data, label, index = batch["data"], batch["label"], batch["index"]
-            # [800, 60, 17], [800], [800]
-            feature = data[:, :, : -self.tra.num_states]
-            hist_loss = data[:, : -data_set.horizon, -self.tra.num_states:]
+            # [800, 60, 16+nums], [800], [800]
+            feature = data[:, :, :-self.tra.num_states]
+            hist_loss = data[:, :-data_set.horizon, -self.tra.num_states:] # [b, 39, 3], todo: 60-21 = 39
 
             with torch.no_grad():
-                hidden = self.model(feature)
-                pred, all_preds, prob = self.tra(hidden, hist_loss)
+                hidden = self.model(feature) # [b, 512]
+                pred, all_preds, prob = self.tra(hidden, hist_loss) # [b]
 
-            L = (all_preds - label[:, None]).pow(2)
+            L = (all_preds - label[:, None]).pow(2) # [n, 3]
 
             L -= L.min(dim=-1, keepdim=True).values  # normalize & ensure positive input
 
-            data_set.assign_data(index, L)  # save loss to memory
+            data_set.update_memory(index, L)  # save loss to memory
 
-            X = np.c_[pred.cpu().numpy(), label.cpu().numpy(),]
+            X = np.c_[pred.cpu().numpy(), label.cpu().numpy(),] # [n, 1+1]
             columns = ["score", "label"]
             if prob is not None:
-                X = np.c_[X, all_preds.cpu().numpy(), prob.cpu().numpy()]
+                X = np.c_[X, all_preds.cpu().numpy(), prob.cpu().numpy()] # [n, 1+1 + 3 + 3]
                 columns += ["score_%d" % d for d in range(all_preds.shape[1])] + ["prob_%d" % d for d in range(all_preds.shape[1])]
 
             pred = pd.DataFrame(X, index=index.cpu().numpy(), columns=columns)
-
             metrics.append(evaluate(pred))
 
             if return_pred:
@@ -267,102 +295,89 @@ class Run_TRAModel():
 
         return metrics, preds
 
-    def fit(self, evals_result=dict()):
+    def fit(self):
 
         train_set, valid_set, test_set = self.dataset.prepare(["train", "valid", "test"])
         # 1024 * [1632 / 318 / 333], [2512790, 17/1/1], [1670400], [324800], [340790]
-        best_score = -1
-        best_epoch = 0
-        stop_rounds = 0
-        best_params = {"model": copy.deepcopy(self.model.state_dict()), "tra": copy.deepcopy(self.tra.state_dict()), }
-        params_list = {"model": collections.deque(maxlen=self.smooth_steps), "tra": collections.deque(maxlen=self.smooth_steps), }
-        evals_result["train"] = []
-        evals_result["valid"] = []
-        evals_result["test"] = []
+        best_score_ic = -1e20
+        params_list = {"basic": collections.deque(maxlen=self.smooth_steps), "tra": collections.deque(maxlen=self.smooth_steps), } # 一直追加
 
         # train
         self.fitted = True
         self.global_step = -1
         # todo: 理清 Memory 机制
         if self.tra.num_states > 1:
-            self.logger.info("init memory...")
-            self.test_epoch(train_set)
+            self.logger.info("init memory by testing on train dataset ...")
+            init_metrics, init_preds = self.test_epoch(train_set)
 
         for epoch in range(self.n_epochs):
-            self.logger.info("Epoch %d:", epoch)
+            # 1. 训练
+            total_loss, total_mse_loss, total_assign_loss = self.train_epoch(train_set)
 
-            self.logger.info("training...")
-            self.train_epoch(train_set)
+            self.summary_writer.add_scalar("Training/loss", total_loss, epoch)
+            self.summary_writer.add_scalar("Training/mse_loss", total_mse_loss, epoch)
+            self.summary_writer.add_scalar("Training/assign_loss", total_assign_loss, epoch)
+            self.logger.info(f"Epoch {epoch}: Training | all loss {total_loss:>.6f} | mse loss {total_mse_loss:>.6f} | assign loss {total_assign_loss:>.6f}")
 
-            self.logger.info("evaluating...")
-            # average params for inference
-            params_list["model"].append(copy.deepcopy(self.model.state_dict()))
+            # 2. 用滑动平均的参数验证 average params for inference
+            params_list["basic"].append(copy.deepcopy(self.model.state_dict()))
             params_list["tra"].append(copy.deepcopy(self.tra.state_dict()))
-            self.model.load_state_dict(average_params(params_list["model"]))
+            self.model.load_state_dict(average_params(params_list["basic"])) # todo: 这一步的作用是什么
             self.tra.load_state_dict(average_params(params_list["tra"]))
 
             # NOTE: during evaluating, the whole memory will be refreshed
             if self.tra.num_states > 1 or self.eval_train:
+                # todo: 这里为什么要清空存储
                 train_set.clear_memory()  # NOTE: clear the shared memory
                 train_metrics = self.test_epoch(train_set)[0]
-                evals_result["train"].append(train_metrics)
-                self.logger.info("\ttrain metrics: %s" % train_metrics)
+                self.summary_writer.add_scalar("TestingTrain/MSE", train_metrics['MSE'], epoch)
+                self.summary_writer.add_scalar("TestingTrain/MAE", train_metrics['MAE'], epoch)
+                self.summary_writer.add_scalar("TestingTrain/IC", train_metrics['IC'], epoch)
+                self.summary_writer.add_scalar("TestingTrain/ICIR", train_metrics['ICIR'], epoch)
+                self.logger.info(f"Epoch {epoch}: Testing trainSet | MSE {train_metrics['MSE']:>.6f} | MAE {train_metrics['MAE']:>.6f} | IC {train_metrics['IC']:>.6f} | ICIR {train_metrics['ICIR']:>.6f}")
 
             valid_metrics = self.test_epoch(valid_set)[0]
-            evals_result["valid"].append(valid_metrics)
-            self.logger.info("\tvalid metrics: %s" % valid_metrics)
-
-            if self.eval_test:
-                test_metrics = self.test_epoch(test_set)[0]
-                evals_result["test"].append(test_metrics)
-                self.logger.info("\ttest metrics: %s" % test_metrics)
-
-            if valid_metrics["IC"] > best_score:
-                best_score = valid_metrics["IC"]
-                stop_rounds = 0
-                best_epoch = epoch
-                best_params = {"model": copy.deepcopy(self.model.state_dict()), "tra": copy.deepcopy(self.tra.state_dict()), }
-            else:
-                stop_rounds += 1
-                if stop_rounds >= self.early_stop:
-                    self.logger.info("early stop @ %s" % epoch)
-                    break
+            self.summary_writer.add_scalar("TestingVal/MSE", valid_metrics['MSE'], epoch)
+            self.summary_writer.add_scalar("TestingVal/MAE", valid_metrics['MAE'], epoch)
+            self.summary_writer.add_scalar("TestingVal/IC", valid_metrics['IC'], epoch)
+            self.summary_writer.add_scalar("TestingVal/ICIR", valid_metrics['ICIR'], epoch)
+            self.logger.info(f"Epoch {epoch}: Testing valSet | MSE {valid_metrics['MSE']:>.6f} | MAE {valid_metrics['MAE']:>.6f} | IC {valid_metrics['IC']:>.6f} | ICIR {valid_metrics['ICIR']:>.6f}")
 
             # restore parameters
-            self.model.load_state_dict(params_list["model"][-1])
+            self.model.load_state_dict(params_list["basic"][-1])
             self.tra.load_state_dict(params_list["tra"][-1])
+            # 在测试集 保存并回测模型
+            test_metrics, test_preds = self.test_epoch(test_set, return_pred=True)
+            self.summary_writer.add_scalar("TestingTest/MSE", test_metrics['MSE'], epoch)
+            self.summary_writer.add_scalar("TestingTest/MAE", test_metrics['MAE'], epoch)
+            self.summary_writer.add_scalar("TestingTest/IC", test_metrics['IC'], epoch)
+            self.summary_writer.add_scalar("TestingTest/ICIR", test_metrics['ICIR'], epoch)
+            self.logger.info(f"Epoch {epoch}: Testing testSet | MSE {test_metrics['MSE']:>.6f} | MAE {test_metrics['MAE']:>.6f} | IC {test_metrics['IC']:>.6f} | ICIR {test_metrics['ICIR']:>.6f}")
 
-        self.logger.info("best score: %.6lf @ %d" % (best_score, best_epoch))
-        self.model.load_state_dict(best_params["model"])
-        self.tra.load_state_dict(best_params["tra"])
+            # 保存并回测模型
+            if test_metrics["IC"] > best_score_ic:
+                best_score_ic = test_metrics["IC"]
 
-        metrics, preds = self.test_epoch(test_set, return_pred=True)
-        self.logger.info("test metrics: %s" % metrics)
+                test_preds.to_pickle(os.path.join(self.logdir, f"pred.pkl"))
+                torch.save({"basic": copy.deepcopy(self.model.state_dict()), "tra": copy.deepcopy(self.tra.state_dict())}, os.path.join(self.logdir, "model.bin"))
 
-        if self.logdir:
-            self.logger.info("save model & pred to local directory")
+                self.logger.info(f"Epoch {epoch}: Best model and predictions SAVED and scores could be found ABOVE!")
 
-            pd.concat({name: pd.DataFrame(evals_result[name]) for name in evals_result}, axis=1).to_csv(self.logdir + "/logs.csv", index=False)
+                # 回测
+                backtest_matric, pnl = backtest(pred_path=os.path.join(self.logdir, "pred.pkl"), ret_path=self.ret_path)
+                self.summary_writer.add_scalar("Backtesting/MSE", float(backtest_matric['MSE']), epoch)
+                self.summary_writer.add_scalar("Backtesting/MAE", float(backtest_matric['MAE']), epoch)
+                self.summary_writer.add_scalar("Backtesting/IC", float(backtest_matric['IC']), epoch)
+                self.summary_writer.add_scalar("Backtesting/ICIR", float(backtest_matric['ICIR']), epoch)
+                self.summary_writer.add_scalar("Backtesting/AR", float(backtest_matric['AR'][:-1]) / 100, epoch)
+                self.summary_writer.add_scalar("Backtesting/VR", float(backtest_matric['VR'][:-1]) / 100, epoch)
+                self.summary_writer.add_scalar("Backtesting/SR", float(backtest_matric['SR']), epoch)
+                self.summary_writer.add_scalar("Backtesting/MDD", float(backtest_matric['MDD'][:-1]) / 100, epoch)
+                self.logger.info(f"Epoch {epoch}: Backtesting ||- MSE {backtest_matric['MSE']} | MAE {backtest_matric['MAE']} | IC {backtest_matric['IC']} | ICIR {backtest_matric['ICIR']} -||- AR {backtest_matric['AR']} | VR {backtest_matric['VR']} | SR {backtest_matric['SR']} | MDD {backtest_matric['MDD']} -||")
 
-            torch.save(best_params, self.logdir + "/model.bin")
 
-            preds.to_pickle(self.logdir + "/pred.pkl")
 
-            info = {
-                "config": {"model_config": self.model_config, "tra_config": self.tra_config, "lr": self.lr, "n_epochs": self.n_epochs, "early_stop": self.early_stop, "smooth_steps": self.smooth_steps,
-                    "max_steps_per_epoch": self.max_steps_per_epoch, "lamb": self.lamb, "rho": self.rho, "seed": self.seed, "logdir": self.logdir, }, "best_eval_metric": -best_score,
-                # NOTE: minux -1 for minimize
-                "metric": metrics, }
-            with open(self.logdir + "/info.json", "w") as f:
-                json.dump(info, f)
 
-    def predict(self, segment="test"):
-        if not self.fitted:
-            raise ValueError("model is not fitted yet!")
 
-        test_set = self.dataset.prepare(segment)
 
-        metrics, preds = self.test_epoch(test_set, return_pred=True)
-        self.logger.info("test metrics: %s" % metrics)
 
-        return preds
