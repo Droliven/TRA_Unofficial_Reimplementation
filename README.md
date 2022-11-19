@@ -5,6 +5,10 @@
 [\[Official Project\]](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/TRA/README.md)
 [\[Official Dataset\]](https://drive.google.com/drive/folders/1fMqZYSeLyrHiWmVzygeI4sw3vp5Gt8cY)
 
+**Notes**:
+
+2022.11.19: TRA 的核心思想是捕捉股票特征中的多样的数据模式 (multi patterns), 其设计了多头预测器，并通过一种路由分配机制 (Temporal Routing Adaptor) 选择预测头。这跟我们最近的多样化人体动作预测的工作 [\[Diverse Human Motion Prediction via Gumbel-Softmax Sampling from an Auxiliary Space (Dang et al., ACMMM2022) \]](https://github.com/Droliven/diverse_sampling) 有异曲同工之妙，另外二者都涉及到了 gumbel-softmax 的采样机制。
+
 
 ## 本项目与原项目的区别
 
@@ -13,6 +17,8 @@
 3. 本项目通过 tensorboard scalar 可以在训练过程中，监视各项指标的变化曲线，更加直观
 
 ## 运行
+
+Download the dataset and modify data paths in the `configs` dictionary.
 
 Take ALSTM as backbone:
 
