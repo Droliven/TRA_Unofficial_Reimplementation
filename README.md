@@ -1,5 +1,6 @@
 # TRA Unofficial Reimplementation
-> TRA (KDD2021) 是基于 QLib 调度框架的，数据模型内部处理不太透明，本项目抽丝剥茧，尽可能将其完全从 QLib 解耦出来，力图理清所有细节。
+> An Unofficial Reimplementation of [Learning Multiple Stock Trading Patterns with Temporal Routing Adaptor and Optimal Transport (Lin et al., TRA, KDD2021)](https://dl.acm.org/doi/abs/10.1145/3447548.3467358?casa_token=BuvssX11egYAAAAA:ddUznyIdxvDN1wIJNzss-6T4__oJz3Vi_poOTGXgfUuA5HA4oooK6cbhS-xWLzyb8sQNCAxaHDk). 
+> TRA 是基于 Microsoft QLib 框架组织的，数据模型内部处理不太透明，本项目抽丝剥茧，尽可能将其完全从 QLib 解耦出来，力图理清所有细节。
 
 [\[Official Project\]](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/TRA/README.md)
 [\[Official Dataset\]](https://drive.google.com/drive/folders/1fMqZYSeLyrHiWmVzygeI4sw3vp5Gt8cY)
