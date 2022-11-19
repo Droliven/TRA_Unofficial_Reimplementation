@@ -4,6 +4,7 @@ __pycache__/
 bert_base_uncased/*
 baselines_chenchaoyu/*
 *test*.py
+!runs/*
 *.zip
 *.rar
 *.7z
