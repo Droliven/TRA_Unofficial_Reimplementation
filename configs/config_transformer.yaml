@@ -1,0 +1,45 @@
+num_states: &num_states 1
+
+model:
+  lr: 0.0002
+  n_epochs: 500
+  max_steps_per_epoch: 100
+  early_stop: 20
+  seed: 1000
+  logdir: ckpt/transformer
+  model_type: Transformer
+  model_config:
+    input_size: 16
+    hidden_size: 64
+    num_layers: 2
+    num_heads: 4
+    use_attn: False
+    dropout: 0.1
+  tra_config:
+    num_states: *num_states
+    hidden_size: 16
+    tau: 1.0
+    src_info: LR_TPE
+  lamb: 1.0
+  rho: 0.99
+  freeze_model: False
+  model_init_state:
+dataset:
+  handler:
+    data_loader:
+      config:
+        #        feature: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\feature.pkl
+        #        label: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\label.pkl
+        #        ret: E:\PythonWorkspace\finc_tech\datas\ranking\tra_data\ret.pkl
+        feature: /home/songbo/danglingwei209/datas/ranking/tra_data/feature.pkl
+        label: /home/songbo/danglingwei209/datas/ranking/tra_data/label.pkl
+        ret: /home/songbo/danglingwei209/datas/ranking/tra_data/ret.pkl
+  segments:
+    train: [2007-10-30, 2016-05-27]
+    valid: [2016-09-26, 2018-05-29]
+    test: [2018-09-21, 2020-06-30]
+  seq_len: 60
+  horizon: 21
+  num_states: *num_states
+  batch_size: 1024
+  is_debug: False

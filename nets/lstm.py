@@ -87,3 +87,9 @@ class LSTM(nn.Module):
             last_out = torch.cat([last_out, att_out], dim=1)
 
         return last_out
+
+if __name__ == '__main__':
+    m = LSTM().cuda()
+    x = torch.randn((8, 60, 16)).cuda()
+    y = m(x)
+    pass

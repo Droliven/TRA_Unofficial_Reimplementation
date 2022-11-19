@@ -12,3 +12,4 @@ ckpt/
 dataset/
 *.out
 *.txt
+*.log

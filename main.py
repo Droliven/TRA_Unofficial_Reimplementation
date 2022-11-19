@@ -35,6 +35,11 @@ parser = argparse.ArgumentParser(description='manual to this script')
 # parser.add_argument('--config_path', type=str, default='./configs/config_alstm.yaml', help="")
 parser.add_argument('--config_path', type=str, default='./configs/config_alstm_tra_init.yaml', help="")
 # parser.add_argument('--config_path', type=str, default='./configs/config_alstm_tra.yaml', help="")
+
+# parser.add_argument('--config_path', type=str, default='./configs/config_transformer.yaml', help="")
+# parser.add_argument('--config_path', type=str, default='./configs/config_transformer_tra_init.yaml', help="")
+# parser.add_argument('--config_path', type=str, default='./configs/config_transformer_tra.yaml', help="")
+
 args = parser.parse_args()
 
 with open(args.config_path, "r", encoding="utf-8") as f:

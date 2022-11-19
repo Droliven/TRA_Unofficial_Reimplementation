@@ -95,24 +95,7 @@ def backtest(pred_path=r"E:\PythonWorkspace\finc_tech\stock_ranking\tra_kdd21_re
     }
     return matric, r
 
-def backtest_multi(fname):
-    res = []
-    pnl = []
-    metric, r = backtest(fname)
-    res.append(metric)
-    pnl.append(r)
-    res = pd.DataFrame(res)
-    pnl = pd.concat(pnl, axis=1)
-    return {
-        'MSE': fmt(res['MSE'], std=True),
-        'MAE': fmt(res['MAE'], std=True),
-        'IC': fmt(res['IC']),
-        'ICIR': fmt(res['ICIR']),
-        'AR': fmt(res['AR'], scale=100, p=1)+'%',
-        'VR': fmt(res['AV'], scale=100, p=1)+'%',
-        'SR': fmt(res['SR']),
-        'MDD': fmt(res['MDD'], scale=100, p=1)+'%'
-    }, pnl
+
 
 if __name__ == '__main__':
     # exps = {
@@ -137,7 +120,7 @@ if __name__ == '__main__':
     #     for k, v in res.items()
     # }).T
 
-    a, b = backtest()
+    # a, b = backtest()
     pass
 
 

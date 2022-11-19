@@ -56,6 +56,7 @@ class Transformer(nn.Module):
             dropout=0.0,
             input_drop=0.0,
             noise_level=0.0,
+            *args,
             **kwargs,
     ):
         super().__init__()
@@ -79,6 +80,11 @@ class Transformer(nn.Module):
         self.output_size = hidden_size
 
     def forward(self, x):
+        '''
+
+        :param x: [n, 60, 16]
+        :return:
+        '''
         x = self.input_drop(x)
 
         if self.training and self.noise_level > 0:
@@ -92,3 +98,9 @@ class Transformer(nn.Module):
         out = self.encoder(x)
 
         return out[-1]
+
+if __name__ == '__main__':
+    m = Transformer().cuda()
+    x = torch.randn((8, 60, 16)).cuda()
+    y = m(x)
+    pass

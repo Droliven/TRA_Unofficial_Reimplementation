@@ -27,6 +27,7 @@ from tensorboardX import SummaryWriter
 
 from nets.tra import TRA
 from nets.lstm import LSTM
+from nets.transformer import Transformer
 from datas.dataset import MemoryAugmentedTimeSeriesDataset
 from runs.backtest import backtest
 
@@ -139,6 +140,8 @@ class Run_TRAModel():
 
         if model_type == "LSTM":
             self.model = LSTM(**model_config).to(device)
+        elif model_type == "Transformer":
+            self.model = Transformer(**model_config).to(device)
 
         if model_init_state:
             self.model.load_state_dict(torch.load(model_init_state, map_location="cpu")["model"])
@@ -369,10 +372,10 @@ class Run_TRAModel():
                 self.summary_writer.add_scalar("Backtesting/MAE", float(backtest_matric['MAE']), epoch)
                 self.summary_writer.add_scalar("Backtesting/IC", float(backtest_matric['IC']), epoch)
                 self.summary_writer.add_scalar("Backtesting/ICIR", float(backtest_matric['ICIR']), epoch)
-                self.summary_writer.add_scalar("Backtesting/AR", float(backtest_matric['AR'][:-1]) / 100, epoch)
-                self.summary_writer.add_scalar("Backtesting/VR", float(backtest_matric['VR'][:-1]) / 100, epoch)
+                self.summary_writer.add_scalar("Backtesting/AR%", float(backtest_matric['AR'][:-1]), epoch)
+                self.summary_writer.add_scalar("Backtesting/VR%", float(backtest_matric['VR'][:-1]), epoch)
                 self.summary_writer.add_scalar("Backtesting/SR", float(backtest_matric['SR']), epoch)
-                self.summary_writer.add_scalar("Backtesting/MDD", float(backtest_matric['MDD'][:-1]) / 100, epoch)
+                self.summary_writer.add_scalar("Backtesting/MDD%", float(backtest_matric['MDD'][:-1]), epoch)
                 self.logger.info(f"Epoch {epoch}: Backtesting ||- MSE {backtest_matric['MSE']} | MAE {backtest_matric['MAE']} | IC {backtest_matric['IC']} | ICIR {backtest_matric['ICIR']} -||- AR {backtest_matric['AR']} | VR {backtest_matric['VR']} | SR {backtest_matric['SR']} | MDD {backtest_matric['MDD']} -||")
 
 
