@@ -49,7 +49,6 @@ with open(args.config_path, "r", encoding="utf-8") as f:
 seed = cfg["model"]["seed"]
 seed_torch(seed)
 
-cfg["model"].update({"logdir": cfg["model"]["logdir"] + f"_{seed}"})
 logger = Log(log_file_name=f'{getuser()}', log_level=logging.DEBUG, log_dir=cfg["model"]["logdir"]).returnLogger()
 logging.info(f"cuda idx: {os.environ['CUDA_VISIBLE_DEVICES']}")
 

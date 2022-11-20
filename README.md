@@ -32,6 +32,31 @@ Take Transformer as backbone:
 2. `python main --config_path ./configs/config_transformer_tra_init.yaml`
 3. `python main --config_path ./configs/config_transformer_tra.yaml`
 
+## Results
+
+Our best results
+
+| Model | MSE `v` | MAE `v` | IC `^`  | ICIR `^`  | AR(%)  `^`  | AV `v` |  SR(%) `^` | MDD(%) `v` |
+|:----:|:----:|:----:|:----:|:---:|:---:|:---:|:---:|:----:|
+| ALSTM |
+| ALSTM_TRA_init| 
+| ALSTM_TRA| 
+| Transformer| 
+| Transformer_TRA_init| 
+| Transformer_TRA| 
+
+Official best results
+
+| Model | MSE `v` | MAE `v` | IC `^`  | ICIR `^`  | AR(%)  `^`  | AV `v` |  SR(%) `^` | MDD(%) `v` | 
+|:----:|:-----:|:-----:|:-----:|:-------:|:-------:|:----:|:-----:|:----------:|
+| ALSTM | 0.158 | 0.320 | 0.053 |  0.419  |  12.3   | 13.7 | 0.897 |    22.5    |
+| ALSTM_TRA_init| 
+| ALSTM_TRA| 0.157 | 0.318 | 0.059 |  0.460  |  12.4   | 14.0 | 0.885 |    20.4    |
+| Transformer| 0.158 | 0.322 | 0.051 |  0.400  |  14.5   | 14.2 | 1.028 |    22.5    |
+| Transformer_TRA_init| 
+| Transformer_TRA| 0.157 | 0.320 | 0.056 |  0.442  |  16.1   | 14.2 | 1.133 |    23.1    |
+
+
 ## Todo
 
 + [x] 发现模型层、控制层是比较容易剥离的，比较麻烦的是数据层
